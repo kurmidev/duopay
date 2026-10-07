@@ -1,0 +1,15 @@
+{
+  "name": "duopay",
+  "version": "0.1.0",
+  "description": "Multi-SIM UPI prototype: one UPI profile per active SIM number, pay from every linked bank account.",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning src/server.js",
+    "demo": "STATUS_CHECK_GAP_SEC=10 node --no-warnings=ExperimentalWarning src/server.js",
+    "test": "node --no-warnings=ExperimentalWarning --test \"test/*.test.js\"",
+    "lint:sec": "node scripts/security-lint.js",
+    "reset": "node -e \"require('fs').rmSync('data',{recursive:true,force:true});console.log('data/ removed')\""
+  },
+  "license": "MIT"
+}

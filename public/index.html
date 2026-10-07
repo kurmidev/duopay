@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DuoPay · multi-SIM UPI prototype</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">D</span> DuoPay <small>multi-SIM UPI prototype</small></div>
+  <div class="top-note">Everything outside the phone is a simulator: SIM tray, telecom, PSP/NPCI, banks.</div>
+</header>
+<main class="stage">
+  <section class="hardware" aria-label="Phone hardware">
+    <h2>Phone hardware</h2>
+    <p class="hint">Insert, remove or swap SIMs to see what happens to each profile.</p>
+    <div id="tray"></div>
+    <label class="switch"><input type="checkbox" id="airplane"><span>Airplane mode</span></label>
+    <button id="resetDevice" class="ghost small">Factory-reset this phone</button>
+  </section>
+
+  <section class="phone-wrap" aria-label="Phone">
+    <div class="phone">
+      <div class="statusbar" id="statusbar"></div>
+      <div class="app" id="app"></div>
+      <nav class="tabs" id="tabs"></nav>
+      <div id="cl-root"></div>
+    </div>
+  </section>
+
+  <section class="ops" aria-label="Behind the scenes">
+    <h2>Behind the scenes</h2>
+    <div class="panel">
+      <h3>Issuer banks <span class="hint">(simulated)</span></h3>
+      <div id="banks"></div>
+    </div>
+    <div class="panel">
+      <h3>Profiles in DuoPay backend</h3>
+      <div id="opsProfiles"></div>
+    </div>
+    <div class="panel">
+      <h3>Audit ledger <span id="chain" class="chip"></span></h3>
+      <ol id="audit" class="audit"></ol>
+    </div>
+    <details class="panel">
+      <summary>Demo cheat sheet (fictional data)</summary>
+      <div id="cheat"></div>
+    </details>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
