@@ -48,7 +48,7 @@ Format: context → decision → consequences. Status is *Accepted* unless noted
 ## ADR-010: The binding SMS must come from the SIM in this slot (operator cross-check)
 **Context.** Found while writing the binding tests. The SMS proves possession of *a* SIM with that number, not that the SIM sits in the slot being bound. A token relayed from a second phone would create a profile tied to slot 1's SIM fingerprint but another SIM's number. Continuous SIM checks would then pass while the number's SIM is elsewhere.
 **Decision.** The device reports each slot's MCC-MNC (signed in `X-Sim-State`). Binding stores it, and the SMS is accepted only if the originating number's operator (MNP lookup) matches.
-**Consequences.** + Cross-operator relays are rejected (tested). − Same-operator relays are not caught by this check alone; production adds a telco number-verification / SIM-swap API (GSMA Open Gateway style) at binding. Recorded as a residual risk.
+**Consequences.** + An honest app on a normal phone rejects cross-operator relays (tested). − **This is a client-trust control.** A tampered app can claim any carrier for a slot (found by the security review, M2), and same-operator relays aren't caught anyway. **It is not sufficient on its own:** production must verify the number server-side with a telco number-verification API (GSMA Open Gateway style) at binding. Tracked as HLD open item O6.
 
 ## ADR-009: NPCI per-app quotas are counted per installation, not per profile
 **Context.** NPCI limits some APIs "per app" (e.g. list account 25/day). It's unclear whether two profiles count as one app.

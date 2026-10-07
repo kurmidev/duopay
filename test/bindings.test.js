@@ -48,6 +48,7 @@ test('4th binding attempt for the same SIM within 24h is blocked', async () => {
   for (let i = 0; i < 3; i++) {
     const r = await d.call('POST', '/v1/bindings', { slot: 1, profilePublicKeyJwk: { kty: 'EC', crv: 'P-256', x: 'a', y: 'b' } });
     assert.equal(r.status, 201); // never completed (no SMS sent)
+    t.advance(46); // let it expire so the next one isn't "in progress"
   }
   const r = await d.call('POST', '/v1/bindings', { slot: 1, profilePublicKeyJwk: { kty: 'EC', crv: 'P-256', x: 'a', y: 'b' } });
   assert.equal(r.body.error.code, 'BINDING_LIMIT');

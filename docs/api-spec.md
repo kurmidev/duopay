@@ -48,7 +48,7 @@ The app must then send `token` as an SMS **from that slot** to `vmn`. In the pro
 ```json
 { "status": "PENDING" | "VERIFIED" | "FAILED" | "EXPIRED",
   "failReason": null | "TOKEN_EXPIRED" | "TOKEN_MULTI_SOURCE" | "VMN_MISMATCH" | "SIM_NUMBER_MISMATCH" | "NUMBER_ALREADY_BOUND_ON_THIS_DEVICE",
-  "profile": { "id": "prf_…", "slot": 2, "msisdnMasked": "70XXXXXX02", "vpa": "3f9a.2@duopay", "state": "BOUND" } }
+  "profile": { "id": "prf_…", "slot": 2, "msisdnMasked": "70XXXXXX02", "vpa": "dp8w2z0c7hn.2@duopay", "state": "BOUND" } }
 ```
 
 ## Profiles and accounts

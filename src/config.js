@@ -64,7 +64,8 @@ export function loadConfig(overrides = {}) {
       model: env('CLAUDE_MODEL', 'claude-haiku-4-5'),
       timeoutMs: int('ADVISOR_TIMEOUT_MS', 800),
     },
-    enableSimulators: env('ENABLE_SIMULATORS', production ? 'false' : 'true') === 'true',
+    // Simulator/ops routes fake SMS and expose demo PINs: they can never be enabled in production.
+    enableSimulators: !production && env('ENABLE_SIMULATORS', 'true') === 'true',
     ...overrides,
   };
 }

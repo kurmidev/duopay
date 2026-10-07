@@ -54,8 +54,8 @@ Dual-SIM phones are now the norm in India. Many people keep two numbers, for exa
 
 ```mermaid
 flowchart LR
-  C["Device installation<br/>(one app on one phone)"] --> P1["Profile 1<br/>SIM slot 1 · 98xxxxxx01<br/>device binding #1<br/>VPA rahul@duo"]
-  C --> P2["Profile 2<br/>SIM slot 2 · 70xxxxxx02<br/>device binding #2<br/>VPA rahul.2@duo"]
+  C["Device installation<br/>(one app on one phone)"] --> P1["Profile 1<br/>SIM slot 1 · 98xxxxxx01<br/>device binding #1<br/>VPA dp3kf9x2m1q.1@duopay"]
+  C --> P2["Profile 2<br/>SIM slot 2 · 70xxxxxx02<br/>device binding #2<br/>VPA dp8w2z0c7hn.2@duopay"]
   P1 --> A1["Bank A savings"]
   P1 --> A2["Bank B salary"]
   P2 --> A3["Bank C savings"]
@@ -301,7 +301,8 @@ At most one profile per active SIM slot, and at most 2 per device in v1 (configu
 | Pay from SIM 2's account while SIM 2 is absent | Payment requires that profile's key **and** SIM present; checked at the gateway and again in the orchestrator |
 | One phone hosting many people's numbers (mule pattern) | Profile cap = active SIM slots; device-level velocity rules; binding attempt limits per device; audit trail (ADR-004 accepts the residual risk) |
 | Replayed or shared binding SMS | One-time tokens, 45s expiry, decline the same token from multiple numbers (C1) |
-| Token relayed from a SIM in **another** phone (binds a number whose SIM isn't in this slot) | Slot's operator (MCC-MNC) must match the number's operator from an MNP lookup; production adds a telco number-verification API (ADR-010) |
+| Token relayed from a SIM in **another** phone (binds a number whose SIM isn't in this slot) | Prototype: the slot's operator (MCC-MNC) must match the number's operator from an MNP lookup. This is client-reported, so it is a weak control. **Production: telco number-verification API at binding (ADR-010, O6)** |
+| Bypassing binding limits (fingerprint rotation, re-installs, parallel bindings) | Attempts counted per slot, per device and per number (not per client-supplied fingerprint); one binding in flight per device; cap re-checked at completion |
 | Cloned or rooted app | Play Integrity / attestation at binding; key in hardware keystore |
 | PIN theft | PIN captured only by the NPCI CL; never in DuoPay memory, logs or backend |
 | Double debit on retry | Idempotency keys; never re-send `ReqPay`; status checks only |
@@ -348,6 +349,8 @@ flowchart LR
 | O3 | Whether the PSP's fraud team requires a same-owner check despite ADR-004 | Compliance / Risk |
 | O4 | iOS feasibility (no SIM-slot APIs, no silent SMS) | Mobile |
 | O5 | Cooling-off cap value per bank policy | Risk |
+| O6 | Integrate a telco number-verification / SIM-swap API at binding (replaces the client-reported carrier check) | Engineering / PSP |
+| O7 | Whether "add another account later" on an ACTIVE profile counts as onboarding under OC-95 (C3) | Compliance |
 
 ## Sources
 

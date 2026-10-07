@@ -16,4 +16,7 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 - AI routing advisor (Claude, forced tool call) with eligibility rules, a permutation check, number grounding and a rules fallback.
 - Binding operator cross-check (ADR-010): reject a token relayed from a SIM in another phone.
 - Security lint (`npm run lint:sec`) wired as a Claude Code hook.
+
+### Security
+- Fixed findings H1–L4 from the independent security review (see docs/security-review.md): binding cap race, attempt-limit bypass, discovery without SIM, simulators in production, low-entropy VPAs, keyed audit chain.
 - Phone simulator with two SIM slots, the DuoPay app UI, and an ops console with a hash-chained audit log.

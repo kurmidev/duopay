@@ -1,5 +1,6 @@
 // Profile state machine (LLD §4.2). The ONLY place allowed to change profiles.state.
-import { newId, encrypt, hmac, maskMsisdn, sha256 } from '../lib/crypto.js';
+import { randomBytes } from 'node:crypto';
+import { newId, encrypt, hmac, maskMsisdn } from '../lib/crypto.js';
 import { nowIso, nowMs } from '../lib/time.js';
 import { AppError } from '../http/errors.js';
 import * as audit from './audit.js';
@@ -16,8 +17,9 @@ export function create(ctx, { installationId, slot, msisdn, simFp, publicKeyJwk 
   return ctx.db.tx(() => {
     const id = newId('prf');
     const msisdnHash = hmac(ctx.cfg.dataKey, msisdn);
-    // VPA is deterministic per number but never contains it (LLD §4.1).
-    const vpa = `${sha256(msisdnHash).slice(0, 4)}.${slot}@duopay`;
+    // VPA: 64 random bits, unique across ALL rows so a deregistered VPA is never reissued to someone else.
+    // It never contains the phone number (LLD §4.1).
+    const vpa = `dp${BigInt(`0x${randomBytes(8).toString('hex')}`).toString(36)}.${slot}@duopay`;
     const at = nowIso();
     ctx.db.run(`INSERT INTO profiles (id, installation_id, slot, msisdn_enc, msisdn_hash, msisdn_masked, sim_fp, public_key_jwk, vpa, state, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'BOUND', ?, ?)`,

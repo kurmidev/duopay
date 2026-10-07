@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   msisdn_masked    TEXT NOT NULL,                     -- 98XXXXXX01
   sim_fp           TEXT NOT NULL,                     -- fingerprint bound at binding time
   public_key_jwk   TEXT NOT NULL,                     -- per-profile signing key
-  vpa              TEXT NOT NULL,
+  vpa              TEXT NOT NULL UNIQUE,              -- random; never reissued
   state            TEXT NOT NULL CHECK (state IN ('BOUND','ACTIVE','SUSPENDED','DEREGISTERED')),
   state_reason     TEXT,
   activated_at     TEXT,                              -- start of cooling-off window
@@ -32,8 +32,6 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 -- One live profile per SIM number across the whole system (a number is bound to one device at a time)
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_live_msisdn ON profiles(msisdn_hash) WHERE state <> 'DEREGISTERED';
--- A VPA belongs to one live profile (re-binding the same number reuses its VPA)
-CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_live_vpa ON profiles(vpa) WHERE state <> 'DEREGISTERED';
 -- One live profile per slot per installation
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_live_slot ON profiles(installation_id, slot) WHERE state <> 'DEREGISTERED';
 
@@ -53,7 +51,8 @@ CREATE TABLE IF NOT EXISTS bindings (
   expires_at       TEXT NOT NULL,
   created_at       TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_bindings_attempts ON bindings(installation_id, sim_fp, created_at);
+CREATE INDEX IF NOT EXISTS ix_bindings_attempts ON bindings(installation_id, slot, created_at);
+CREATE INDEX IF NOT EXISTS ix_bindings_number ON bindings(received_msisdn_hash, created_at);
 
 CREATE TABLE IF NOT EXISTS accounts (
   id               TEXT PRIMARY KEY,                  -- acc_xxx

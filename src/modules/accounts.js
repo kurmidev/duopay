@@ -6,11 +6,15 @@ import * as profiles from './profiles.js';
 import * as limits from './limits.js';
 import * as audit from './audit.js';
 
-export function discover(ctx, installationId, profileId, bankCode) {
+export function discover(ctx, installationId, profileId, bankCode, simState) {
   const p = profiles.get(ctx, profileId);
   if (!p || p.installation_id !== installationId) fail('NOT_FOUND', 'profile not found');
   if (!['BOUND', 'ACTIVE'].includes(p.state)) fail('PROFILE_NOT_ACTIVE', `Profile is ${p.state}${p.state_reason ? ` (${p.state_reason})` : ''}`);
   if (typeof bankCode !== 'string' || !/^[A-Z]{4}$/.test(bankCode)) fail('VALIDATION', 'bankCode must be a 4-letter bank code');
+  // HLD C2: the SIM must be present and active for this request too (SIM integrity skips BOUND profiles).
+  if (simState.airplane) fail('AIRPLANE_MODE', 'Turn off airplane mode to link accounts');
+  const slot = simState.slots.find((s) => s.slot === p.slot);
+  if (!slot || slot.state !== 'READY' || slot.fp !== p.sim_fp) fail('SIM_ABSENT', `SIM ${p.slot} must be in the phone to link its accounts`);
 
   // HLD C3/C5: ReqListAccount only here, and the per-app quota is shared by all profiles on the device.
   const quota = limits.consumeQuota(ctx, installationId, 'LIST_ACCOUNT', ctx.cfg.listAccountQuota);

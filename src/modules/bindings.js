@@ -16,9 +16,16 @@ export function start(ctx, installationId, { slot, profilePublicKeyJwk }, simSta
   return ctx.db.tx(() => {
     if (profiles.liveBySlot(ctx, installationId, slot)) fail('SLOT_ALREADY_BOUND', `Slot ${slot} already has a profile`);
     if (profiles.liveForInstallation(ctx, installationId).length >= ctx.cfg.maxProfiles) fail('PROFILE_CAP', `At most ${ctx.cfg.maxProfiles} profiles per device`);
-    const attempts = ctx.db.get('SELECT COUNT(*) AS n FROM bindings WHERE installation_id = ? AND sim_fp = ? AND created_at > ?',
-      installationId, sim.fp, isoMinus(86_400)).n;
-    if (attempts >= ctx.cfg.bindingMaxAttempts) fail('BINDING_LIMIT', 'Too many verification attempts for this SIM. Try again after 24 hours');
+    // Count by slot and by device, NOT by the client-supplied fingerprint (rotating it must not reset the limit).
+    const since = isoMinus(86_400);
+    const attempts = ctx.db.get('SELECT COUNT(*) AS n FROM bindings WHERE installation_id = ? AND slot = ? AND created_at > ?', installationId, slot, since).n;
+    if (attempts >= ctx.cfg.bindingMaxAttempts) fail('BINDING_LIMIT', 'Too many verification attempts for this SIM slot. Try again after 24 hours');
+    const deviceAttempts = ctx.db.get('SELECT COUNT(*) AS n FROM bindings WHERE installation_id = ? AND created_at > ?', installationId, since).n;
+    if (deviceAttempts >= ctx.cfg.bindingMaxAttempts * ctx.cfg.maxProfiles) fail('BINDING_LIMIT', 'Too many verification attempts on this device. Try again after 24 hours');
+    // One binding in flight per device: concurrent pending bindings could otherwise race past the profile cap.
+    if (ctx.db.get("SELECT 1 AS x FROM bindings WHERE installation_id = ? AND status = 'PENDING' AND expires_at > ?", installationId, nowIso())) {
+      fail('BINDING_IN_PROGRESS', 'Finish verifying the other SIM first');
+    }
 
     const id = newId('bnd');
     const token = bindingToken(40);
@@ -64,7 +71,19 @@ export function onSmsReceived(ctx, { vmn, text, originMsisdn }) {
     if (existing && existing.installation_id !== b.installation_id) profiles.transition(ctx, existing.id, 'deregister', 'REBOUND_ON_OTHER_DEVICE');
     if (existing && existing.installation_id === b.installation_id) return failWith('FAILED', 'NUMBER_ALREADY_BOUND_ON_THIS_DEVICE');
 
-    const p = profiles.create(ctx, { installationId: b.installation_id, slot: b.slot, msisdn: originMsisdn, simFp: b.sim_fp, publicKeyJwk: JSON.parse(b.profile_key_jwk) });
+    // Per-number limit survives re-installs and fingerprint changes (HLD C1).
+    const numberAttempts = ctx.db.get('SELECT COUNT(*) AS n FROM bindings WHERE received_msisdn_hash = ? AND created_at > ? AND id <> ?', fromHash, isoMinus(86_400), b.id).n;
+    if (numberAttempts >= ctx.cfg.bindingMaxAttempts) return failWith('FAILED', 'BINDING_LIMIT');
+    // Re-check slot and cap at completion time, not only at start.
+    if (profiles.liveBySlot(ctx, b.installation_id, b.slot)) return failWith('FAILED', 'SLOT_ALREADY_BOUND');
+    if (profiles.liveForInstallation(ctx, b.installation_id).length >= ctx.cfg.maxProfiles) return failWith('FAILED', 'PROFILE_CAP');
+
+    let p;
+    try {
+      p = profiles.create(ctx, { installationId: b.installation_id, slot: b.slot, msisdn: originMsisdn, simFp: b.sim_fp, publicKeyJwk: JSON.parse(b.profile_key_jwk) });
+    } catch {
+      return failWith('FAILED', 'PROFILE_CONFLICT'); // constraint race: fail closed, consume the token
+    }
     ctx.db.run("UPDATE bindings SET status = 'VERIFIED', received_msisdn_hash = ?, profile_id = ? WHERE id = ?", fromHash, p.id, b.id);
     audit.append(ctx, 'BINDING_VERIFIED', { installationId: b.installation_id, profileId: p.id, bindingId: b.id, slot: b.slot });
   });

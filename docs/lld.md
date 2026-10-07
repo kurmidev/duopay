@@ -116,7 +116,7 @@ classDiagram
 | Binding token | 40 characters from `[A-Za-z0-9!#$%*+=?@^_~]` using `crypto.randomInt`, so it is ≥35 characters with a mix of character types (HLD C1). **Only its SHA-256 is stored** |
 | MSISDN at rest | `AES-256-GCM(DATA_KEY)` as `iv:tag:ct` (base64url) + `HMAC-SHA256(DATA_KEY, msisdn)` for unique lookups + masked form `98XXXXXX01` |
 | SIM fingerprint (device side) | `SHA-256(simSalt + ':' + iccid)`, hex. The salt is issued per installation, so fingerprints can't be linked across installations |
-| Audit hash | `SHA-256(prev_hash + '|' + at + '|' + event + '|' + profileId + '|' + data)` |
+| Audit hash | `HMAC-SHA256(DATA_KEY, prev_hash + '|' + at + '|' + event + '|' + profileId + '|' + data)` |
 
 ### 3.2 Request signing (`http/auth.js`)
 Each installation and each profile has its own ECDSA P-256 key pair. The private key never leaves the device: a non-extractable WebCrypto key stands in for the Android Keystore.
@@ -137,6 +137,21 @@ METHOD \n PATH \n X-Timestamp \n X-Nonce \n SHA256(body) \n SHA256(X-Sim-State)
 
 Verification order: install exists → timestamp → installation signature → nonce unused → (if required) profile signature with **the key of the profile that owns the account being debited**. The nonce is recorded in its own transaction **before** any business logic runs, so a request that later fails can't be replayed either.
 
+### 3.3 Request pipeline (every signed call)
+
+```mermaid
+flowchart TB
+  R["HTTP request"] --> B["Read body ≤16 KB, parse JSON"]
+  B --> A{"auth.js<br/>install known? timestamp ±120 s?<br/>installation signature valid?"}
+  A -- no --> E1["401 INVALID_SIGNATURE / REPLAY"]
+  A -- yes --> N{"nonce unused?"}
+  N -- no --> E1
+  N -- "yes (store nonce)" --> S["simIntegrity.check<br/>suspend / deregister / reactivate<br/>each profile from signed X-Sim-State"]
+  S --> H["Route handler (module function)"]
+  H --> O["JSON response + simCheck[]"]
+  H -- AppError --> E2["{error:{code,message}} with LLD §7 status"]
+```
+
 > **Limitation (documented):** SIM state is reported by the device. In production it is backed by Play Integrity attestation and, where operators offer it, a telco SIM-swap API check at binding and before high-value payments.
 
 ## 4. Module designs
@@ -149,7 +164,9 @@ startBinding(installationId, {slot, profilePublicKeyJwk}, simState)
   2. slot in simState.slots with state READY           else SIM_ABSENT
   3. no live profile in this slot                      else SLOT_ALREADY_BOUND
   4. live profiles on installation < MAX_PROFILES (2)  else PROFILE_CAP
-  5. attempts(installationId, simFp, last 24h) < 3     else BINDING_LIMIT
+  5. attempts(installation, slot, 24h) < 3 AND attempts(installation, 24h) < 3 × MAX_PROFILES   else BINDING_LIMIT
+     (never counted by the client-supplied fingerprint, which an attacker can rotate)
+  5a. no other non-expired PENDING binding on this installation                     else BINDING_IN_PROGRESS
   6. token = randomToken(40); vmn = random(VMN_POOL[10])
   7. INSERT bindings(status PENDING, token_hash, carrier = slot's MCC-MNC, expires_at = now + 45s)
   8. audit BINDING_STARTED
@@ -162,6 +179,9 @@ onSmsReceived({vmn, text, originMsisdn})        ← called by the PSP adapter
   4. if vmn ≠ b.vmn → FAILED VMN_MISMATCH
   4a. if MNP-operator(originMsisdn) ≠ b.carrier → FAILED SIM_NUMBER_MISMATCH   (ADR-010: token relayed from a SIM in another phone)
   4b. if this number already has a live profile on THIS installation → FAILED NUMBER_ALREADY_BOUND_ON_THIS_DEVICE
+  4c. if ≥3 bindings received from this number in 24h (any installation) → FAILED BINDING_LIMIT   (survives re-installs)
+  4d. re-check: slot still free and live profiles < MAX_PROFILES → else FAILED SLOT_ALREADY_BOUND / PROFILE_CAP
+  4e. profile insert hits a constraint → FAILED PROFILE_CONFLICT (fail closed; token consumed)
   5. existing live profile for this msisdn on ANOTHER installation
        → profiles.deregister(old, 'REBOUND_ON_OTHER_DEVICE')  (same as normal UPI device change)
   6. profile = profiles.create({slot, msisdn, simFp, key, vpa}) in state BOUND
@@ -170,7 +190,7 @@ onSmsReceived({vmn, text, originMsisdn})        ← called by the PSP adapter
 getBinding(id) → {status, profile?}   (expired PENDING is lazily marked EXPIRED)
 ```
 
-VPA format: `<first 4 digits of hash>.<slot>@duopay`. It is deterministic per number, so re-binding the same number gives the same VPA, and the VPA never contains the phone number.
+VPA format: `dp<64 random bits in base36>.<slot>@duopay`. It is unique across **all** rows, so a VPA is never reissued, even after deregistration (a recycled VPA could route money to a stranger). It never contains the phone number.
 
 ### 4.2 `profiles.js`: state machine
 
@@ -207,7 +227,8 @@ It runs as **middleware on every signed request**, so the latest SIM state is en
 
 ```
 discover(installationId, profileId, bankCode)
-  1. profile live & SIM present (middleware already ran)
+  1. profile BOUND or ACTIVE; this request's signed SIM state shows the profile's slot READY with the bound fingerprint and airplane off
+     (SIM integrity doesn't suspend BOUND profiles, so discovery checks this itself)
   2. limits.consumeQuota(installationId, 'LIST_ACCOUNT')   ≤ 25/day per installation (shared by all profiles)
   3. psp.listAccounts({msisdn: decrypt(profile.msisdn_enc), bankCode})   ← ReqListAccount
   4. upsert accounts (masked number, IFSC, type, opaque ref). Holder name and balance are NOT stored
@@ -293,10 +314,29 @@ checkStatus(installationId, txnId)
   NEVER re-sends ReqPay
 ```
 
+```mermaid
+flowchart TB
+  P["POST /v1/payments"] --> I{"Idempotency-Key seen?"}
+  I -- "same body" --> RET["200: return stored txn<br/>(no second ReqPay)"]
+  I -- "different body" --> C409["409 IDEMPOTENCY_CONFLICT"]
+  I -- new --> AC{"account's profile ACTIVE?<br/>(its SIM present)"}
+  AC -- no --> PNA["409 PROFILE_NOT_ACTIVE"]
+  AC -- yes --> SIG{"X-Profile-Signature by<br/>THAT profile's key?"}
+  SIG -- no --> INV["401 INVALID_SIGNATURE"]
+  SIG -- yes --> TX["db.tx: limits.assertFits + risk.evaluate<br/>+ INSERT txn INITIATED"]
+  TX -- "limit / cooling-off" --> L422["422"]
+  TX -- "risk CONFIRM w/o confirm" --> L428["428 CONFIRM_REQUIRED"]
+  TX -- "risk BLOCK" --> L403["403 RISK_BLOCKED"]
+  TX -- ok --> PAY["psp.pay (ReqPay) once"]
+  PAY --> RES{"result"}
+  RES -- SUCCESS/FAILURE --> DONE["update txn, audit, 201"]
+  RES -- "PENDING / unknown" --> PEN["txn PENDING → checkStatus only (paced)"]
+```
+
 The credential block is opaque to DuoPay. It is passed through to the PSP and is **never logged or stored**.
 
 ### 4.9 `audit.js`
-`append(event, {installationId, profileId, data})` runs inside the caller's DB transaction: read the last hash, compute the new hash, insert. `verify()` walks the chain and reports the first broken `seq`. Payloads hold masked values only, enforced by an allow-list of keys per event type.
+`append(event, {installationId, profileId, data})` runs inside the caller's DB transaction: read the last hash, compute the new **HMAC-SHA256 (keyed with `DATA_KEY`)**, insert. The key means someone with DB access alone can't rewrite and re-chain the ledger. `verify()` walks the chain and reports the first broken `seq`. Payloads hold masked values only, enforced by an allow-list of keys per event type.
 
 ## 5. NPCI Common Library simulation (`public/cl.js`)
 1. The app requests the issuer's public key (`GET /sim/npci/keys?bank=BNKC`, mirroring `ListKeys`).
@@ -320,7 +360,8 @@ The credential block is opaque to DuoPay. It is passed through to the PSP and is
 |---|---|---|
 | `INVALID_SIGNATURE` | 401 | Missing or bad installation/profile signature |
 | `REPLAY` | 401 | Nonce reused or timestamp out of window |
-| `AIRPLANE_MODE` | 409 | Binding or payment attempted in airplane mode |
+| `AIRPLANE_MODE` | 409 | Binding, linking or payment attempted in airplane mode |
+| `BINDING_IN_PROGRESS` | 409 | Another SIM's verification is still pending on this device |
 | `SIM_ABSENT` | 409 | Required SIM slot is empty or not ready |
 | `SIM_CHANGED` | 409 | Different SIM in a bound slot; profile deregistered |
 | `SLOT_ALREADY_BOUND` | 409 | Slot already has a live profile |
@@ -353,7 +394,7 @@ The credential block is opaque to DuoPay. It is passed through to the PSP and is
 | `STATUS_CHECK_GAP_SEC` / `STATUS_CHECK_MAX` | 90 / 3 | demo may lower the gap |
 | `SUSPEND_TTL_DAYS` | 7 | |
 | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`, `ADVISOR_TIMEOUT_MS` | —, `claude-haiku-4-5`, 800 | the advisor needs low latency, so a small model by default |
-| `ENABLE_SIMULATORS` | true unless `NODE_ENV=production` | `/sim/*` and `/ops/*` routes |
+| `ENABLE_SIMULATORS` | true in dev; **forced false when `NODE_ENV=production`** | `/sim/*` and `/ops/*` routes |
 
 ## 9. Test plan (maps to `test/`)
 

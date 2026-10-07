@@ -53,7 +53,7 @@ export function createApp(overrides = {}) {
     profiles: profiles.liveForInstallation(ctx, auth.installation.id).map((p) => ({ ...profiles.view(ctx, p), accounts: accounts.forProfile(ctx, p.id) })),
   }]);
   route('GET', '/v1/banks', () => [200, { banks: psp.banks().map(({ code, name, status }) => ({ code, name, status })) }]);
-  route('POST', '/v1/profiles/:id/accounts/discover', ({ params, body, auth }) => [200, accounts.discover(ctx, auth.installation.id, params.id, body.bankCode)]);
+  route('POST', '/v1/profiles/:id/accounts/discover', ({ params, body, auth }) => [200, accounts.discover(ctx, auth.installation.id, params.id, body.bankCode, auth.simState)]);
   route('DELETE', '/v1/profiles/:id', ({ params, auth }) => {
     const p = profiles.get(ctx, params.id);
     if (!p || p.installation_id !== auth.installation.id || p.state === 'DEREGISTERED') throw new AppError('NOT_FOUND', 'profile not found');
@@ -66,7 +66,7 @@ export function createApp(overrides = {}) {
     const r = payments.pay(ctx, auth.installation.id, body, req.headers['idempotency-key'], auth.verifyProfileSig);
     return [r.replayed ? 200 : 201, { transaction: r.transaction }];
   });
-  route('GET', '/v1/payments', ({ auth, url }) => [200, { transactions: payments.history(ctx, auth.installation.id, Number(url.searchParams.get('limit')) || 20) }]);
+  route('GET', '/v1/payments', ({ auth, url }) => [200, { transactions: payments.history(ctx, auth.installation.id, Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get('limit'), 10) || 20))) }]);
   route('POST', '/v1/payments/:id/check-status', ({ params, auth }) => [200, payments.checkStatus(ctx, auth.installation.id, params.id)]);
 
   // ---- simulators + ops (dev only) ----
