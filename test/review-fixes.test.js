@@ -2,7 +2,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestApp, device, onboardedDevice, SIM } from './helpers.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, parseDotEnvLine } from '../src/config.js';
 import { verify } from '../src/modules/audit.js';
 
 let t;
@@ -104,4 +104,19 @@ test('L4: re-chaining the audit log without the key is detected', async () => {
     prev = h;
   }
   assert.equal(verify(t.app.ctx).ok, false);
+});
+
+test('an invalid DATA_KEY stops startup with a clear message (not a binding failure later)', () => {
+  assert.throws(() => loadConfig({ quiet: true, dataKey: 'changeme' }), /64 hex characters/);
+  assert.equal(loadConfig({ quiet: true, dataKey: 'ab'.repeat(32) }).dataKey, 'ab'.repeat(32));
+});
+
+test('.env parser drops inline comments, keeps quoted values, ignores comment lines, handles CRLF', () => {
+  assert.deepEqual(parseDotEnvLine('DATA_KEY=                     # leave empty in dev'), ['DATA_KEY', '']);
+  assert.deepEqual(parseDotEnvLine('PORT=3000   # change if busy'), ['PORT', '3000']);
+  assert.deepEqual(parseDotEnvLine('ANTHROPIC_API_KEY=sk-ant-abc123\r'), ['ANTHROPIC_API_KEY', 'sk-ant-abc123']);
+  assert.deepEqual(parseDotEnvLine('NOTE="hash # inside quotes"'), ['NOTE', 'hash # inside quotes']);
+  assert.deepEqual(parseDotEnvLine("export CLAUDE_MODEL='claude-haiku-4-5'"), ['CLAUDE_MODEL', 'claude-haiku-4-5']);
+  assert.equal(parseDotEnvLine('# just a comment'), null);
+  assert.equal(parseDotEnvLine(''), null);
 });

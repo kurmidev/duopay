@@ -115,3 +115,8 @@ th { color: var(--muted); font-weight: 600; border-top: 0; }
 .audit .ev { font-family: var(--mono); font-weight: 600; font-size: 11px; }
 .audit .d { color: var(--muted); font-family: var(--mono); font-size: 11px; word-break: break-all; }
 details summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+
+.linked-list { margin: 8px 0; }
+.link-results .notice { margin: 6px 0; }
+.notice:not(.ok):not(.bad):not(.info) { background: #f1efe8; color: var(--muted); }
+.banks-pick label .chip { margin-left: auto; }

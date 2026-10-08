@@ -1,7 +1,13 @@
 import { createServer } from 'node:http';
 import { createApp } from './app.js';
 
-const app = createApp();
+let app;
+try {
+  app = createApp();
+} catch (e) {
+  console.error(`\n[duopay] cannot start: ${e.message}\n`);
+  process.exit(1);
+}
 const server = createServer(app.handle);
 server.listen(app.cfg.port, app.cfg.host, () => {
   console.log(`DuoPay on http://${app.cfg.host}:${app.cfg.port}`);

@@ -181,7 +181,7 @@ onSmsReceived({vmn, text, originMsisdn})        ← called by the PSP adapter
   4b. if this number already has a live profile on THIS installation → FAILED NUMBER_ALREADY_BOUND_ON_THIS_DEVICE
   4c. if ≥3 bindings received from this number in 24h (any installation) → FAILED BINDING_LIMIT   (survives re-installs)
   4d. re-check: slot still free and live profiles < MAX_PROFILES → else FAILED SLOT_ALREADY_BOUND / PROFILE_CAP
-  4e. profile insert hits a constraint → FAILED PROFILE_CONFLICT (fail closed; token consumed)
+  4e. profile insert hits a UNIQUE constraint → FAILED PROFILE_CONFLICT; any other error → FAILED INTERNAL_ERROR, logged (fail closed; token consumed)
   5. existing live profile for this msisdn on ANOTHER installation
        → profiles.deregister(old, 'REBOUND_ON_OTHER_DEVICE')  (same as normal UPI device change)
   6. profile = profiles.create({slot, msisdn, simFp, key, vpa}) in state BOUND

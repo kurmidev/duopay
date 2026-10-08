@@ -214,6 +214,8 @@ function simsScreen() {
       return h('div', { class: `card s${slot}` },
         h('div', { class: 'row' }, h('span', { class: `chip s${slot}` }, `Slot ${slot}`), p ? stateChip(p) : h('span', { class: 'sub' }, sim ? sim.operator : 'Empty')),
         p ? h('div', {}, h('div', {}, `${p.msisdnMasked}`), h('div', { class: 'sub mono' }, p.vpa)) : null,
+        p && p.accounts.length ? h('div', { class: 'linked-list' }, p.accounts.map((a) => h('div', { class: 'acct' },
+          h('div', { class: 'acct-main' }, h('div', { class: 'bankdot' }, bankInitial(a.bankName)), h('div', {}, h('div', {}, a.bankName), h('div', { class: 'sub mono' }, a.maskedNumber)))))) : null,
         !p && sim && !phone.airplane ? h('button', { class: 'btn', disabled: b?.busy, onclick: () => bindSlot(slot) }, `Verify SIM ${slot} number`) : null,
         !p && !sim ? h('div', { class: 'sub' }, 'Insert a SIM (left panel) to add a profile.') : null,
         !p && sim && phone.airplane ? h('div', { class: 'why' }, 'Turn off airplane mode to verify.') : null,
@@ -224,15 +226,25 @@ function simsScreen() {
 }
 
 function linkBlock(p) {
-  const l = state.link[p.id] || (state.link[p.id] = { open: p.accounts.length === 0, picked: new Set(), log: [] });
-  if (!l.open) return h('button', { class: 'btn secondary', onclick: () => { l.open = true; render(); } }, 'Link more bank accounts');
+  const l = state.link[p.id] || (state.link[p.id] = { open: p.accounts.length === 0, picked: new Set(), log: [], busy: false });
+  // Results stay visible after a search, so the user always sees what happened.
+  const results = l.log.length ? h('div', { class: 'link-results' }, l.log.map((x) => h('div', { class: `notice ${x.kind}` }, x.text))) : null;
+  if (!l.open) {
+    return h('div', {}, results,
+      h('button', { class: 'btn secondary', onclick: () => { l.open = true; l.log = []; render(); } }, p.accounts.length ? 'Link more bank accounts' : 'Link bank accounts'));
+  }
+  const linked = new Set(p.accounts.map((a) => a.bank));
   return h('div', { class: 'banks-pick' },
     h('div', { class: 'sub' }, `Find accounts registered with ${p.msisdnMasked} at:`),
     state.banks.map((b) => h('label', {},
-      h('input', { type: 'checkbox', checked: l.picked.has(b.code), onchange: (e) => { e.target.checked ? l.picked.add(b.code) : l.picked.delete(b.code); } }),
-      h('span', {}, b.name), b.status === 'DOWN' ? h('span', { class: 'chip bad' }, 'down') : null)),
-    h('button', { class: 'btn', onclick: () => linkAccounts(p) }, 'Search and link'),
-    l.log.map((x) => h('div', { class: 'sub' }, x)));
+      h('input', { type: 'checkbox', checked: l.picked.has(b.code), disabled: l.busy, onchange: (e) => { e.target.checked ? l.picked.add(b.code) : l.picked.delete(b.code); l.error = null; } }),
+      h('span', {}, b.name),
+      linked.has(b.code) ? h('span', { class: 'chip ok' }, 'linked') : null,
+      b.status === 'DOWN' ? h('span', { class: 'chip bad' }, 'down') : null)),
+    l.error ? h('div', { class: 'notice bad' }, l.error) : null,
+    h('button', { class: 'btn', disabled: l.busy, onclick: () => linkAccounts(p) }, l.busy ? 'Searching…' : 'Search and link'),
+    p.accounts.length ? h('button', { class: 'ghost small', onclick: () => { l.open = false; render(); } }, 'Done') : null,
+    results);
 }
 
 async function bindSlot(slot) {
@@ -268,16 +280,31 @@ async function bindSlot(slot) {
 
 async function linkAccounts(p) {
   const l = state.link[p.id];
+  if (!l.picked.size) { l.error = 'Tick at least one bank first.'; return render(); }
   l.log = [];
+  l.error = null;
+  l.busy = true;
+  render();
+  let anyLinked = false;
   for (const code of l.picked) {
     const bank = state.banks.find((b) => b.code === code);
     const r = await call('POST', `/v1/profiles/${p.id}/accounts/discover`, { bankCode: code });
-    l.log.push(r.ok ? `${bank.name}: ${r.body.accounts.filter((a) => a.bank === code).length ? 'account linked' : 'no account for this number'} (lookups today ${r.body.quota.used}/${r.body.quota.limit})` : `${bank.name}: ${r.body.error.message}`);
+    if (!r.ok) {
+      l.log.push({ kind: 'bad', text: `${bank.name}: ${r.body.error.message}` });
+    } else {
+      const found = r.body.accounts.filter((a) => a.bank === code);
+      anyLinked ||= found.length > 0;
+      l.log.push(found.length
+        ? { kind: 'ok', text: `${bank.name}: linked ${found.map((a) => a.maskedNumber).join(', ')}` }
+        : { kind: '', text: `${bank.name}: no account registered with ${p.msisdnMasked}` });
+    }
     render();
   }
+  l.busy = false;
   l.picked = new Set();
-  l.open = false;
+  l.open = !anyLinked; // keep the picker open if nothing was found, so the user can try another bank
   await refresh();
+  renderOps();
 }
 
 async function removeProfile(p) {

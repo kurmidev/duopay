@@ -81,8 +81,11 @@ export function onSmsReceived(ctx, { vmn, text, originMsisdn }) {
     let p;
     try {
       p = profiles.create(ctx, { installationId: b.installation_id, slot: b.slot, msisdn: originMsisdn, simFp: b.sim_fp, publicKeyJwk: JSON.parse(b.profile_key_jwk) });
-    } catch {
-      return failWith('FAILED', 'PROFILE_CONFLICT'); // constraint race: fail closed, consume the token
+    } catch (e) {
+      // Fail closed and consume the token either way, but only call it a conflict when it really is one.
+      const conflict = /UNIQUE constraint/i.test(e.message);
+      if (!conflict) console.error('[duopay] profile creation failed:', e.message);
+      return failWith('FAILED', conflict ? 'PROFILE_CONFLICT' : 'INTERNAL_ERROR');
     }
     ctx.db.run("UPDATE bindings SET status = 'VERIFIED', received_msisdn_hash = ?, profile_id = ? WHERE id = ?", fromHash, p.id, b.id);
     audit.append(ctx, 'BINDING_VERIFIED', { installationId: b.installation_id, profileId: p.id, bindingId: b.id, slot: b.slot });

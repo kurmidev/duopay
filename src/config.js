@@ -6,12 +6,27 @@ import { randomBytes } from 'node:crypto';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Parses one .env line like the common dotenv format: `KEY=value`, `KEY="quoted # kept"`,
+ * `KEY=value   # inline comment` (comment dropped), blank lines and `# comments` ignored, CRLF safe.
+ * Returns [key, value] or null.
+ */
+export function parseDotEnvLine(line) {
+  const m = line.replace(/\r$/, '').match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+  if (!m) return null;
+  let v = m[2];
+  const q = v.match(/^(["'])(.*?)\1/);
+  if (q) v = q[2];
+  else v = v.replace(/(^|\s+)#.*$/, '').trim(); // unquoted: drop inline comment
+  return [m[1], v];
+}
+
 function loadDotEnv() {
   const p = join(ROOT, '.env');
   if (!existsSync(p)) return;
   for (const line of readFileSync(p, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (m && !line.trim().startsWith('#') && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+    const kv = parseDotEnvLine(line);
+    if (kv && process.env[kv[0]] === undefined) process.env[kv[0]] = kv[1];
   }
 }
 loadDotEnv();
@@ -33,10 +48,15 @@ function devDataKey(overrides) {
 
 export function loadConfig(overrides = {}) {
   const production = env('NODE_ENV', 'development') === 'production';
-  let dataKey = env('DATA_KEY', '');
+  let dataKey = overrides.dataKey || env('DATA_KEY', '');
   if (!dataKey) {
     if (production) throw new Error('DATA_KEY (32-byte hex) is required in production');
     dataKey = devDataKey(overrides);
+  }
+  // AES-256 needs exactly 32 bytes. Fail at startup with a clear message instead of failing every SIM binding later.
+  if (!/^[0-9a-fA-F]{64}$/.test(dataKey)) {
+    throw new Error('DATA_KEY must be exactly 64 hex characters (32 bytes). Leave it empty in development, or generate one with:\n'
+      + '  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   }
   return {
     production,
@@ -53,7 +73,7 @@ export function loadConfig(overrides = {}) {
     dailyCount: int('DAILY_COUNT', 20),
     txnLimitPaise: int('TXN_LIMIT_PAISE', 10_000_000),
     listAccountQuota: int('LIST_ACCOUNT_QUOTA', 25),
-    statusCheckGapSec: int('STATUS_CHECK_GAP_SEC', 90),
+    statusCheckGapSec: int('STATUS_CHECK_GAP_SEC', process.argv.includes('--demo') ? 10 : 90), // --demo: shorter gap for live demos
     statusCheckMax: int('STATUS_CHECK_MAX', 3),
     statusCheckWindowSec: 2 * 3600,
     suspendTtlDays: int('SUSPEND_TTL_DAYS', 7),
